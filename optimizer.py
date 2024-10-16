@@ -2,20 +2,42 @@ from projections import Projections
 import collections
 import numpy as np
 
+# Converts list of remaining positions (i.e. ["RB", "RB", "WR", "FLEX"]) 
+# to a dictionary of max remaining positions {"RB": 3, "WR": 2}
+def getMaxRemainingPosDict(remainingPosList):
+    posNum = collections.defaultdict(int)
+    
+    for pos in remainingPosList:
+        if pos == "FLEX":
+            posNum["RB"] += 1
+            posNum["WR"] += 1
+        else:
+            posNum[pos] += 1
+    
+    return dict(posNum)
 
-# Iterates through projections, and removes players who have projections lower than somebody cheaper than them
-def cleanProj(data):
-    sorted_data = data.sort_values("Salary")
-    maxes = collections.defaultdict(int)
-    # NOTE: Iterating thorugh rows in pandas apparently slow. Possibly faster solution in different route (should be
-    # relatively inconsequential to run-time for any NFL slate)
+# Iterates through projections, and removes players who have projections lower than 'posNum' players cheaper than them at their position
+def cleanProj(data, remainingPosDict):
+    filtered_data = data[data['Position'].isin(remainingPosDict.keys())]
+    sorted_data = filtered_data.sort_values("Salary")
+    
+    pos_trackers = collections.defaultdict(list)
     indices = []
+    
+    # Iterate through the sorted data
     for index, row in sorted_data.iterrows():
         currProj = row["Fpts"]
         currPos = row["Position"]
-        if currProj > maxes[currPos]:
-            maxes[currPos] = currProj
+        
+        # Check how many cheaper players with the same position project higher
+        cheaper_better_players = [proj for proj in pos_trackers[currPos] if proj[0] > currProj]
+        
+        # Keep the player if fewer than posNum players project higher than them
+        if len(cheaper_better_players) < remainingPosDict[currPos]:
             indices.append(index)
+            pos_trackers[currPos].append((currProj, row["Salary"]))  # Track projections and salary
+
+    # Return the filtered result
     result = sorted_data[sorted_data.index.isin(indices)]
     return result
 
@@ -33,7 +55,7 @@ def getPosIndices(clean_data, posList):
     wrInds = clean_data[clean_data["Position"] == "WR"].index.tolist()
     teInds = clean_data[clean_data["Position"] == "TE"].index.tolist()
     dstInds = clean_data[clean_data["Position"] == "DST"].index.tolist()
-    flexInds = rbInds + teInds + wrInds
+    flexInds = rbInds + wrInds
 
     result = ()
     for pos in posList:
@@ -57,7 +79,8 @@ def getPosIndices(clean_data, posList):
 def optimize(numRemainingPos, remainingPosList, remainingSal, excludedNames, numLineups, salariesDir, projDir):
     proj = Projections(salariesDir, projDir)
     data = proj.data
-    clean_data = cleanProj(data)
+    maxRemainingPosDict = getMaxRemainingPosDict(remainingPosList)
+    clean_data = cleanProj(data, maxRemainingPosDict)
     removePlayers(clean_data, excludedNames)
     clean_data.reset_index(drop=True, inplace=True)
     posIndicies = getPosIndices(clean_data, remainingPosList)
@@ -78,7 +101,7 @@ def optimize(numRemainingPos, remainingPosList, remainingSal, excludedNames, num
     salaries = clean_data["Salary"].to_numpy(copy=True)
     salaryMatrix = np.repeat(salaries.reshape(1, -1), indexCombinations.shape[0], axis=0)
 
-    # Create masks for salary and duplicate (no more than 1 of each player) restraints
+    # Create masks for salary and duplicate (no more than 1 of each player) constraints
     lineupSalMatrix = salaryMatrix * playerIdentities
     lineupSalTotals = np.sum(lineupSalMatrix, axis=1)
     salMask = np.where(lineupSalTotals <= remainingSal, 1, 0)
@@ -99,6 +122,17 @@ def optimize(numRemainingPos, remainingPosList, remainingSal, excludedNames, num
         print(str(lineupProjTotals[lineupInd]) + " Fpts")
         print("\n")
         lineupNum -= 1
+
+def teamProj(players, salariesDir, projDir):
+    proj = Projections(salariesDir, projDir)
+    data = proj.data
+    data['Ownership'] = data['Ownership'] /100
+    total_fpts = data[data['Name'].isin(players)]['Fpts'].sum()
+    print(players)
+    print("Points: ",total_fpts)
+    print("Players: ", data[data['Name'].isin(players)]['Fpts'].count())
+    print("Own: ", data[data['Name'].isin(players)]['Ownership'].product())
+    print(data[data['Name'].isin(players)]['Ownership'])
 
 
 if __name__ == "__main__":

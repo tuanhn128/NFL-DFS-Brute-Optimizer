@@ -9,14 +9,14 @@ class Projections:
         self.data.rename(columns={'TeamAbbrev': 'Team'}, inplace=True)
 
         # Read in Projections
-        projCols = ["Name", "Fpts", "Team", "Position"]
+        projCols = ["Position", "Name", "Team", "Fpts", "Ownership"]
         projections = pd.read_csv(projDir, usecols=projCols)
         projDSTRows = projections.loc[projections["Position"] == "DST"]
         projDST = projDSTRows.drop(columns=["Name"])
 
         projDSTData = self.data.merge(projDST)
         self.data = self.data.merge(projections)
-        self.data = self.data.append(projDSTData)
+        self.data = pd.concat([self.data, projDSTData])
 
 
 
